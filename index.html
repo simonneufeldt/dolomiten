@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dolomiten Roadtrip 2026 – Route</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1d3557; }
+
+  header {
+    background: linear-gradient(135deg, #0d1b2a, #1e5f74);
+    color: white;
+    padding: 14px 22px;
+  }
+  header h1 { font-size: 1.25em; letter-spacing: -0.3px; }
+  header .sub { font-size: 0.85em; opacity: 0.85; margin-top: 2px; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    height: calc(100vh - 64px);
+  }
+  @media (max-width: 800px) {
+    .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; }
+    #sidebar { max-height: 50vh; overflow-y: auto; }
+    #map { height: 60vh; }
+  }
+
+  #sidebar {
+    background: #f6f8fa;
+    border-right: 1px solid #e1e6ec;
+    padding: 16px 18px;
+    overflow-y: auto;
+  }
+  #sidebar h2 { font-size: 1em; margin-bottom: 6px; color: #0f3a46; }
+  #sidebar .legend { font-size: 0.82em; margin-bottom: 14px; color: #4a5b6b; line-height: 1.5; }
+
+  .segment {
+    background: white;
+    border: 1px solid #e6ebf0;
+    border-radius: 8px;
+    padding: 10px 12px 10px 14px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.1s;
+    border-left-width: 6px;
+  }
+  .segment:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); transform: translateX(2px); }
+  .segment .route-name { font-weight: 600; font-size: 0.92em; }
+  .segment .route-stats {
+    display: flex;
+    gap: 14px;
+    margin-top: 4px;
+    font-size: 0.82em;
+    color: #4a5b6b;
+  }
+  .segment .route-stats span strong { color: #1d3557; }
+  .segment.loading .route-stats { color: #999; font-style: italic; }
+
+  .total-box {
+    background: linear-gradient(135deg, #1e5f74, #0f3a46);
+    color: white;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-top: 12px;
+  }
+  .total-box .label { font-size: 0.75em; opacity: 0.85; text-transform: uppercase; letter-spacing: 1px; }
+  .total-box .value { font-size: 1.5em; font-weight: bold; margin-top: 4px; }
+  .total-box .sub-value { font-size: 0.9em; opacity: 0.9; margin-top: 2px; }
+
+  #map { height: 100%; width: 100%; }
+
+  .seg-popup { font-size: 0.9em; }
+  .seg-popup strong { display: block; margin-bottom: 4px; }
+
+  /* Popup-Stil für Stop-Marker mit Bild */
+  .leaflet-popup-content-wrapper { border-radius: 10px; }
+  .leaflet-popup-content { margin: 0; width: 260px !important; }
+  .stop-popup img {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+    display: block;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+  }
+  .stop-popup .body { padding: 10px 12px 12px; }
+  .stop-popup .title { font-weight: 700; font-size: 0.95em; color: #0f3a46; }
+  .stop-popup .sight { font-size: 0.85em; color: #1e5f74; font-weight: 600; margin-top: 2px; }
+  .stop-popup .desc  { font-size: 0.82em; color: #4a5b6b; margin-top: 4px; line-height: 1.4; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🗺️ Dolomiten Roadtrip 2026 – Route</h1>
+    <div class="sub">Kettenkamp → Schweizer Alpen → Dolomiten → über den Brenner zurück</div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside id="sidebar">
+    <h2>Etappen</h2>
+    <div class="legend">
+      Jede Etappe hat eine eigene Farbe – passend zur Linie auf der Karte.<br>
+      Klick auf eine Etappe → Karte zoomt darauf.<br>
+      <span style="opacity:0.75;">Werte mit „~" sind Schätzungen, exakte Werte erscheinen, sobald die Karte geladen hat.</span>
+    </div>
+    <div id="segmentList"></div>
+
+    <div class="total-box">
+      <div class="label">Gesamtstrecke</div>
+      <div class="value" id="totalKm">– km</div>
+      <div class="sub-value" id="totalTime">– Fahrtzeit</div>
+    </div>
+  </aside>
+
+  <div id="map"></div>
+</div>
+
+<script>
+  // Wegpunkte – Sehenswürdigkeit passend zur original HTML
+  // fallbackKm / fallbackMin = Schätzwerte (Apple Maps), werden bei Internet durch OSRM-Werte ersetzt
+  const stops = [
+    { name: "Kettenkamp",            sight: "Start",                                  desc: "Los geht's – Niedersachsen, DE",                       lat: 52.5333, lng: 7.8167  },
+    { name: "Brülisau (CH)",         sight: "Saxerlücke, Alpstein",                   desc: "Wanderung zur Saxerlücke (1.649 m) – Panorama auf Rheintal & Kreuzberge", lat: 47.2839, lng: 9.4453  },
+    { name: "Kandersteg (CH)",       sight: "Oeschinensee",                           desc: "Türkiser Bergsee im Berner Oberland – Sonnenaufgang-Spot",  lat: 46.4953, lng: 7.6722  },
+    { name: "Kastelruth (IT)",       sight: "Seiser Alm / Alpe di Siusi",             desc: "Größte Hochalm Europas – sanfte Wiesen vor schroffen Dolomiten", lat: 46.5707, lng: 11.5604 },
+    { name: "St. Ulrich / Ortisei",  sight: "Seceda",                                 desc: "Die ikonische Dolomiten-Skyline – Foto-Hotspot am Grat",   lat: 46.5746, lng: 11.6699 },
+    { name: "Misurina (IT)",         sight: "Drei Zinnen / Tre Cime di Lavaredo",     desc: "Wahrzeichen der Dolomiten – Rundwanderung & Sonnenaufgang", lat: 46.5833, lng: 12.2547 },
+    { name: "Prags (IT)",            sight: "Lago di Braies / Pragser Wildsee",       desc: "Türkis-grüner Traumsee – früh dort sein (vor 9 Uhr)",      lat: 46.6943, lng: 12.0859 },
+    { name: "Passo Giau (IT)",       sight: "Passo Giau",                             desc: "2.236 m hoher Dolomiten-Pass – Sonnenaufgang direkt am Van", lat: 46.4842, lng: 12.0586 },
+    { name: "Brennerpass",           sight: "Grenze IT/AT (Durchfahrt)",              desc: "Nur Wegpunkt für die Rückfahrt – kein echter Stopp",       lat: 47.0067, lng: 11.5095 },
+    { name: "Kettenkamp",            sight: "Ziel",                                   desc: "Zurück zuhause",                                          lat: 52.5333, lng: 7.8167  }
+  ];
+
+  // Geschätzte Distanz/Fahrzeit pro Etappe (Fallback, falls OSRM nicht erreichbar)
+  const fallback = [
+    { km: 770, min: 480 },   // Kettenkamp → Brülisau
+    { km: 280, min: 210 },   // Brülisau → Kandersteg
+    { km: 430, min: 300 },   // Kandersteg → Kastelruth
+    { km: 15,  min: 25  },   // Kastelruth → St. Ulrich
+    { km: 90,  min: 120 },   // St. Ulrich → Misurina
+    { km: 50,  min: 60  },   // Misurina → Prags
+    { km: 80,  min: 120 },   // Prags → Passo Giau
+    { km: 200, min: 180 },   // Passo Giau → Brennerpass
+    { km: 900, min: 600 }    // Brennerpass → Kettenkamp
+  ];
+
+  // Farben für die 9 Etappen – gut unterscheidbar
+  const colors = [
+    '#e63946', // rot
+    '#f4a261', // orange
+    '#2a9d8f', // türkis
+    '#264653', // dunkelgrün
+    '#6a4c93', // lila
+    '#1d3557', // marineblau
+    '#ff9f1c', // gelb-orange
+    '#118ab2', // blau
+    '#8338ec'  // violett
+  ];
+
+  // Format-Helfer (keine externen Abhängigkeiten)
+  function fmtKm(meters) {
+    const km = meters / 1000;
+    return km >= 100 ? km.toFixed(0) + ' km' : km.toFixed(1) + ' km';
+  }
+  function fmtTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.round((seconds % 3600) / 60);
+    if (h === 0) return m + ' min';
+    return h + ' h ' + (m > 0 ? m + ' min' : '');
+  }
+
+  // ────── 1. SIDEBAR ZUERST aufbauen (funktioniert auch ohne Internet/Karte) ──────
+  const segmentList = document.getElementById('segmentList');
+  const segmentEls = [];
+  let totalDistance = 0;
+  let totalDuration = 0;
+
+  for (let i = 0; i < stops.length - 1; i++) {
+    const from = stops[i];
+    const to = stops[i + 1];
+    const color = colors[i % colors.length];
+    const fb = fallback[i];
+
+    totalDistance += fb.km * 1000;
+    totalDuration += fb.min * 60;
+
+    const el = document.createElement('div');
+    el.className = 'segment';
+    el.style.borderLeftColor = color;
+    el.innerHTML = `
+      <div class="route-name">${i+1}. ${from.name} → ${to.name}<br><span style="font-weight:400;font-size:0.85em;color:#1e5f74;">${to.sight}</span></div>
+      <div class="route-stats">
+        <span>📏 <strong>~${fb.km} km</strong></span>
+        <span>⏱ <strong>~${fmtTime(fb.min * 60)}</strong></span>
+      </div>
+    `;
+    segmentList.appendChild(el);
+    segmentEls.push(el);
+  }
+  document.getElementById('totalKm').textContent = '~' + fmtKm(totalDistance);
+  document.getElementById('totalTime').textContent = '~' + fmtTime(totalDuration) + ' reine Fahrtzeit';
+
+  // ────── 2. KARTE initialisieren (falls Leaflet geladen + Internet) ──────
+  let map = null;
+  const polylines = [];
+
+  try {
+    if (typeof L === 'undefined') throw new Error('Leaflet nicht geladen');
+
+    map = L.map('map', { zoomControl: true }).setView([47.5, 10.5], 6);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      maxZoom: 19
+    }).addTo(map);
+
+    // Marker setzen
+    stops.forEach((s, i) => {
+      if (i === stops.length - 1 && s.lat === stops[0].lat && s.lng === stops[0].lng) return;
+      const icon = L.divIcon({
+        className: 'custom-pin',
+        html: `<div style="
+          background:#1e5f74;
+          color:white;
+          width:30px;height:30px;
+          border-radius:50%;
+          text-align:center;line-height:30px;
+          font-weight:bold;font-size:14px;
+          border:3px solid white;
+          box-shadow:0 2px 6px rgba(0,0,0,0.35);
+        ">${i+1}</div>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
+      });
+
+      const popupHtml = `
+        <div class="stop-popup">
+          <div class="body">
+            <div class="title">${i+1}. ${s.name}</div>
+            <div class="sight">${s.sight}</div>
+            <div class="desc">${s.desc}</div>
+          </div>
+        </div>
+      `;
+
+      L.marker([s.lat, s.lng], { icon }).addTo(map).bindPopup(popupHtml, { maxWidth: 280 });
+    });
+  } catch (err) {
+    console.error('Karte konnte nicht initialisiert werden:', err);
+    document.getElementById('map').innerHTML =
+      '<div style="padding:40px;text-align:center;color:#5a6b7c;background:#f6f8fa;height:100%;display:flex;align-items:center;justify-content:center;">' +
+      '<div><strong>🗺️ Karte konnte nicht geladen werden</strong><br><br>' +
+      'Wahrscheinlich kein Internet oder die Datei wurde im Vorschau-Modus geöffnet.<br>' +
+      'Die Etappenliste links/oben funktioniert trotzdem.</div></div>';
+  }
+
+  // ────── 3. OSRM-Routen holen (nur wenn Karte funktioniert + Internet) ──────
+  // Wenn das nicht klappt, bleiben die Schätzwerte aus Schritt 1 stehen.
+  let osrmTotalDist = 0;
+  let osrmTotalDur = 0;
+  let osrmLoaded = 0;
+
+  if (map) for (let i = 0; i < stops.length - 1; i++) {
+    const from = stops[i];
+    const to = stops[i + 1];
+    const color = colors[i % colors.length];
+
+    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
+
+    fetch(url)
+      .then(r => r.json())
+      .then(data => {
+        if (!data.routes || data.routes.length === 0) throw new Error('Keine Route gefunden');
+        const route = data.routes[0];
+        const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+
+        const polyline = L.polyline(coords, { color, weight: 5, opacity: 0.85 }).addTo(map);
+        polyline.bindPopup(`
+          <div class="seg-popup">
+            <strong>Etappe ${i+1}: ${from.name} → ${to.name}</strong>
+            <em style="color:#1e5f74;">Ziel: ${to.sight}</em><br>
+            📏 ${fmtKm(route.distance)}<br>
+            ⏱ ${fmtTime(route.duration)}
+          </div>
+        `);
+        polylines[i] = { polyline, coords };
+        osrmTotalDist += route.distance;
+        osrmTotalDur += route.duration;
+
+        // Sidebar-Eintrag mit echten Werten ersetzen
+        const el = segmentEls[i];
+        el.innerHTML = `
+          <div class="route-name">${i+1}. ${from.name} → ${to.name}<br><span style="font-weight:400;font-size:0.85em;color:#1e5f74;">${to.sight}</span></div>
+          <div class="route-stats">
+            <span>📏 <strong>${fmtKm(route.distance)}</strong></span>
+            <span>⏱ <strong>${fmtTime(route.duration)}</strong></span>
+          </div>
+        `;
+        el.addEventListener('click', () => {
+          map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+          polyline.openPopup();
+        });
+
+        osrmLoaded++;
+        if (osrmLoaded === stops.length - 1) {
+          document.getElementById('totalKm').textContent = fmtKm(osrmTotalDist);
+          document.getElementById('totalTime').textContent = fmtTime(osrmTotalDur) + ' reine Fahrtzeit';
+        }
+      })
+      .catch(err => {
+        // Schätzwert bleibt einfach stehen – kein Fehlertext nötig
+        console.error('Routing-Fehler Etappe ' + (i+1), err);
+      });
+  }
+</script>
+
+</body>
+</html>
